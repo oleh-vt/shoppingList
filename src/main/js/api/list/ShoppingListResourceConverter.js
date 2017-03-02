@@ -10,9 +10,10 @@ import ShoppingListResource from './ShoppingListResource';
 export default class ShoppingListResourceConverter extends ResourceConverter {
 
     /*@ngInject*/
-    constructor(itemResourceConverter) {
+    constructor(itemResourceConverter, itemService) {
         super();
         this.itemResourceConverter = itemResourceConverter;
+        this.itemService = itemService;
         this.ofJsonConverter = this.ofJson;
         this.toJsonConverter = ShoppingListResourceConverter.toJson;
     }
@@ -24,17 +25,27 @@ export default class ShoppingListResourceConverter extends ResourceConverter {
      * @param entityId {Number} A number that identifies a {ShoppingList} uniquely.
      * @param name {String} the name of the {ShoppingList}.
      * @param owners {Array} An array of {User} who owns this {ShoppingList}.
-     * @param items {Array} An array of {Item} that are contained in this {ShoppingList}.
+     * @param lastModified {Number} Timestamp of last modification.
      * @return {ShoppingList}
      */
-    ofJson({_links, entityId, name, owners, items}) {
+    ofJson({_links, entityId, name, owners, lastModified}) {
 
-        return new ShoppingList({
+        const items = [];
+
+        const shoppingList = new ShoppingList({
             links:_links,
             entityId: entityId,
             name: name,
             owners: owners,
-            items: this.itemResourceConverter.toEntities(items)});
+            items: items,
+            lastModified: lastModified
+        });
+
+        this.itemService.getItemsOfList(shoppingList).then(itemsOfList => {
+            items.push.apply(itemsOfList);
+        }).then(() => {
+            return shoppingList;
+        });
     }
 
     /**

@@ -1,6 +1,6 @@
 export default class ShoppingList {
 
-    constructor({links = [], entityId, name, owners = [], items = []} = {}) {
+    constructor({links = [], entityId, name, owners = [], items = [], lastModified = Date.now()} = {}) {
 
         this.key = 'entityId';
         this.links = links;
@@ -8,5 +8,6 @@ export default class ShoppingList {
         this.name = name;
         this.owners = owners;
         this.items = items;
+        this.lastModified = lastModified;
     }
 }

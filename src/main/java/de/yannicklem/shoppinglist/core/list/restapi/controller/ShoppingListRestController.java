@@ -3,6 +3,10 @@ package de.yannicklem.shoppinglist.core.list.restapi.controller;
 import de.yannicklem.restutils.controller.RestEntityController;
 
 import de.yannicklem.shoppinglist.core.exception.NotFoundException;
+import de.yannicklem.shoppinglist.core.item.entity.Item;
+import de.yannicklem.shoppinglist.core.item.persistence.ItemService;
+import de.yannicklem.shoppinglist.core.item.restapi.controller.ItemRestController;
+import de.yannicklem.shoppinglist.core.item.restapi.service.ItemResourceProcessor;
 import de.yannicklem.shoppinglist.core.list.entity.ShoppingList;
 import de.yannicklem.shoppinglist.core.list.persistence.ShoppingListService;
 import de.yannicklem.shoppinglist.core.list.restapi.service.ShoppingListRequestHandler;
@@ -23,21 +27,19 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.bind.annotation.ResponseStatus;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
+import javax.persistence.EntityNotFoundException;
 import java.security.Principal;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
+import java.time.Instant;
+import java.util.*;
 
+import static java.util.stream.Collectors.*;
 import static org.apache.log4j.Logger.getLogger;
 
 import static java.lang.invoke.MethodHandles.lookup;
+import static org.springframework.web.bind.annotation.RequestMethod.*;
 
 
 @RestController
@@ -50,16 +52,20 @@ import static java.lang.invoke.MethodHandles.lookup;
 public class ShoppingListRestController extends RestEntityController<ShoppingList, String> {
 
     private static Logger LOGGER = getLogger(lookup().lookupClass());
+    private final ItemResourceProcessor itemResourceProcessor;
+    private final ItemRestController itemRestController;
 
     @Autowired
     public ShoppingListRestController(SLUserService slUserService, ShoppingListService shoppingListService,
-        ShoppingListRequestHandler requestHandler, ShoppingListResourceProcessor resourceProcessor,
-        EntityLinks entityLinks) {
+                                      ShoppingListRequestHandler requestHandler, ShoppingListResourceProcessor resourceProcessor,
+                                      EntityLinks entityLinks, ItemResourceProcessor itemResourceProcessor, ItemRestController itemRestController) {
 
         super(slUserService, shoppingListService, requestHandler, resourceProcessor, entityLinks);
+        this.itemResourceProcessor = itemResourceProcessor;
+        this.itemRestController = itemRestController;
     }
 
-    @RequestMapping(method = RequestMethod.DELETE)
+    @RequestMapping(method = DELETE)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteAll(Principal principal) {
 
@@ -74,8 +80,70 @@ public class ShoppingListRestController extends RestEntityController<ShoppingLis
         }
     }
 
+    @RequestMapping(value = "/{id}/items", method = GET)
+    public HttpEntity<Resources<? extends Item>> getItemsOfList(@PathVariable("id") String listId, Principal principal) {
 
-    @RequestMapping(method = RequestMethod.GET, value = "/projections/{projectionName}")
+        ShoppingList shoppingList = entityService.findById(listId).orElseThrow(() -> new NotFoundException("Entity not found"));
+
+        SLUser currentUser = principal == null ? null : slUserService.findById(principal.getName()).orElse(null);
+
+        requestHandler.handleRead(shoppingList, currentUser);
+
+        List<Item> itemResources = shoppingList.getItems()
+                .stream()
+                .map(item -> itemResourceProcessor.process(item, currentUser))
+                .collect(toList());
+
+        return new HttpEntity<>(new Resources<>(itemResources));
+    }
+
+    @RequestMapping(value = "/{id}/items/{itemId}", method = PUT)
+    public void putItem(@RequestBody Item item, @PathVariable("id") String listId,
+                        @PathVariable("itemId") String itemId, Principal principal) {
+
+        ShoppingList shoppingList = this.entityService.findById(listId).orElseThrow(
+                () -> new EntityNotFoundException("List not found")
+        );
+
+        itemRestController.putEntity(item, itemId, principal);
+
+        shoppingList.getItems().add(item);
+        shoppingList.setLastModified(System.currentTimeMillis());
+        this.putEntity(shoppingList, listId, principal);
+    }
+
+    @RequestMapping(value = "/{id}/items", method = POST)
+    public void postItem(@RequestBody Item item, @PathVariable("id") String listId, Principal principal) {
+
+        ShoppingList shoppingList = this.entityService.findById(listId).orElseThrow(
+                () -> new EntityNotFoundException("List not found")
+        );
+
+        itemRestController.postEntity(item, principal);
+
+        shoppingList.getItems().add(item);
+        shoppingList.setLastModified(System.currentTimeMillis());
+        this.putEntity(shoppingList, listId, principal);
+    }
+
+    @RequestMapping(value = "/{id}/items/{itemId}", method = DELETE)
+    public void deleteItem(@PathVariable("id") String listId,
+                        @PathVariable("itemId") String itemId, Principal principal) {
+
+        ShoppingList shoppingList = this.entityService.findById(listId).orElseThrow(
+                () -> new EntityNotFoundException("List not found")
+        );
+
+        itemRestController.deleteEntity(itemId, principal);
+
+        shoppingList.getItems().removeIf(item -> item.getEntityId().equals(listId));
+        shoppingList.setLastModified(System.currentTimeMillis());
+        this.putEntity(shoppingList, listId, principal);
+    }
+
+
+
+    @RequestMapping(method = GET, value = "/projections/{projectionName}")
     public HttpEntity<Resources<? extends ShoppingList>> getProjection(Principal principal,
         @PathVariable("projectionName") String projectionName) {
 
